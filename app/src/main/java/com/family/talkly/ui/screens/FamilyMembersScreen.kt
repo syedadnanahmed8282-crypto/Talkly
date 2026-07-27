@@ -1,0 +1,260 @@
+package com.family.talkly.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.FamilyRestroom
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.family.talkly.data.models.CallType
+import com.family.talkly.data.models.FamilyMember
+import com.family.talkly.ui.components.ContactProfileDetailsDialog
+import com.family.talkly.ui.theme.WhatsappGreen
+import com.family.talkly.ui.theme.WhatsappTeal
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FamilyMembersScreen(
+    familyMembers: List<FamilyMember>,
+    onSelectMember: (FamilyMember) -> Unit,
+    onStartCall: (FamilyMember, CallType) -> Unit,
+    onTogglePresence: (FamilyMember) -> Unit
+) {
+    var selectedContactForProfile by remember { mutableStateOf<FamilyMember?>(null) }
+
+    if (selectedContactForProfile != null) {
+        ContactProfileDetailsDialog(
+            member = selectedContactForProfile!!,
+            onDismiss = { selectedContactForProfile = null },
+            onStartChat = { member ->
+                selectedContactForProfile = null
+                onSelectMember(member)
+            },
+            onStartCall = { member, callType ->
+                selectedContactForProfile = null
+                onStartCall(member, callType)
+            }
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "Family Contacts",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = WhatsappTeal)
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            // Header Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                colors = CardDefaults.cardColors(containerColor = WhatsappTeal.copy(alpha = 0.1f)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(WhatsappTeal, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FamilyRestroom,
+                            contentDescription = null,
+                            tint = Color.White
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = "Private Family Circle",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Text(
+                            text = "${familyMembers.size} connected family members • Tap profile to view details",
+                            fontSize = 11.sp,
+                            color = Color.Gray
+                        )
+                    }
+                }
+            }
+
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)
+            ) {
+                items(familyMembers) { member ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp)
+                            .clickable { selectedContactForProfile = member },
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(54.dp)
+                                    .clickable { selectedContactForProfile = member },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(50.dp)
+                                        .clip(CircleShape)
+                                        .background(WhatsappTeal),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (member.avatarUrl != null) {
+                                        AsyncImage(
+                                            model = member.avatarUrl,
+                                            contentDescription = member.name,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Text(
+                                            text = member.name.take(2).uppercase(),
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 20.sp
+                                        )
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .background(if (member.isOnline) Color(0xFF25D366) else Color.Gray, CircleShape)
+                                        .border(2.dp, Color.White, CircleShape)
+                                        .align(Alignment.BottomEnd)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(16.dp))
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = member.name,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 16.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        color = if (member.isOnline) WhatsappGreen.copy(alpha = 0.15f) else Color.Gray.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier.clickable { onTogglePresence(member) }
+                                    ) {
+                                        Text(
+                                            text = if (member.isTyping) "typing..." else if (member.isOnline) "Online" else "Offline",
+                                            color = if (member.isOnline) WhatsappGreen else Color.Gray,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = member.status,
+                                    fontSize = 13.sp,
+                                    color = Color.Gray,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = member.phone,
+                                    fontSize = 12.sp,
+                                    color = Color.Gray.copy(alpha = 0.8f)
+                                )
+                            }
+
+                            Row {
+                                IconButton(onClick = { onSelectMember(member) }) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.Chat,
+                                        contentDescription = "Chat",
+                                        tint = WhatsappTeal
+                                    )
+                                }
+                                IconButton(onClick = { onStartCall(member, CallType.VIDEO) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Videocam,
+                                        contentDescription = "Video",
+                                        tint = WhatsappTeal
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
