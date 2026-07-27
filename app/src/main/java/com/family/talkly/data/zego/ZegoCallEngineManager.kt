@@ -90,7 +90,14 @@ class ZegoCallEngineManager(private val context: Context) {
     }
 
     fun startOutgoingCall(member: FamilyMember, callType: CallType) {
-        val roomID = "talkly_room_${member.id}_${System.currentTimeMillis()}"
+        if (!member.isRegisteredOnTalkly || member.firebaseUid.isNullOrEmpty()) {
+            Log.w(TAG, "Cannot start call: ${member.name} is not registered on Talkly")
+            android.widget.Toast.makeText(context, "User not registered on Talkly", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val targetUid = member.firebaseUid!!
+        val roomID = "talkly_room_${targetUid}_${System.currentTimeMillis()}"
         _callState.value = CurrentCallInfo(
             state = CallState.OUTGOING_RINGING,
             callType = callType,
@@ -102,15 +109,9 @@ class ZegoCallEngineManager(private val context: Context) {
             isFrontCamera = true,
             isSpeakerOn = true
         )
-        Log.d(TAG, "Starting outgoing ${callType.name} call to ${member.name} in room $roomID via ZEGOCloud")
+        Log.d(TAG, "Starting outgoing ${callType.name} call to registered user Firebase UID: $targetUid (${member.name}) in room $roomID via ZEGOCloud")
 
-        // Auto answer simulation after 3.5 seconds for family demo
-        scope.launch {
-            delay(3500)
-            if (_callState.value.state == CallState.OUTGOING_RINGING) {
-                acceptCall()
-            }
-        }
+        // Calls are ONLY sent to valid, registered user IDs (Firebase UID) and do NOT auto-answer without remote acceptance.
     }
 
     fun triggerIncomingCall(member: FamilyMember, callType: CallType) {

@@ -34,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,7 +61,8 @@ fun ContactProfileDetailsDialog(
     member: FamilyMember,
     onDismiss: () -> Unit,
     onStartChat: (FamilyMember) -> Unit,
-    onStartCall: (FamilyMember, CallType) -> Unit
+    onStartCall: (FamilyMember, CallType) -> Unit,
+    onDeleteContact: ((String) -> Unit)? = null
 ) {
     var showFullAvatarViewer by remember { mutableStateOf(false) }
 
@@ -237,6 +239,35 @@ fun ContactProfileDetailsDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
+                if (!member.isRegisteredOnTalkly) {
+                    Surface(
+                        color = Color(0xFFFFEBEE),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = Color(0xFFD32F2F),
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "User not registered on Talkly",
+                                color = Color(0xFFD32F2F),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
                 // Quick Action Buttons Row (Message, Voice, Video)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -247,11 +278,17 @@ fun ContactProfileDetailsDialog(
                         modifier = Modifier
                             .weight(1f)
                             .padding(horizontal = 4.dp)
-                            .clickable {
-                                onDismiss()
-                                onStartChat(member)
-                            },
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F2F5)),
+                            .then(
+                                if (member.isRegisteredOnTalkly) {
+                                    Modifier.clickable {
+                                        onDismiss()
+                                        onStartChat(member)
+                                    }
+                                } else Modifier
+                            ),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (member.isRegisteredOnTalkly) Color(0xFFF0F2F5) else Color(0xFFEFEFEF)
+                        ),
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Column(
@@ -261,7 +298,7 @@ fun ContactProfileDetailsDialog(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.Chat,
                                 contentDescription = "Chat",
-                                tint = WhatsappTeal,
+                                tint = if (member.isRegisteredOnTalkly) WhatsappTeal else Color.Gray,
                                 modifier = Modifier.size(24.dp)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
@@ -269,7 +306,7 @@ fun ContactProfileDetailsDialog(
                                 text = "Message",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = WhatsappTeal
+                                color = if (member.isRegisteredOnTalkly) WhatsappTeal else Color.Gray
                             )
                         }
                     }
@@ -279,11 +316,17 @@ fun ContactProfileDetailsDialog(
                         modifier = Modifier
                             .weight(1f)
                             .padding(horizontal = 4.dp)
-                            .clickable {
-                                onDismiss()
-                                onStartCall(member, CallType.AUDIO)
-                            },
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F2F5)),
+                            .then(
+                                if (member.isRegisteredOnTalkly) {
+                                    Modifier.clickable {
+                                        onDismiss()
+                                        onStartCall(member, CallType.AUDIO)
+                                    }
+                                } else Modifier
+                            ),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (member.isRegisteredOnTalkly) Color(0xFFF0F2F5) else Color(0xFFEFEFEF)
+                        ),
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Column(
@@ -293,7 +336,7 @@ fun ContactProfileDetailsDialog(
                             Icon(
                                 imageVector = Icons.Default.Call,
                                 contentDescription = "Audio Call",
-                                tint = WhatsappGreen,
+                                tint = if (member.isRegisteredOnTalkly) WhatsappGreen else Color.Gray,
                                 modifier = Modifier.size(24.dp)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
@@ -301,7 +344,7 @@ fun ContactProfileDetailsDialog(
                                 text = "Audio",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = WhatsappGreen
+                                color = if (member.isRegisteredOnTalkly) WhatsappGreen else Color.Gray
                             )
                         }
                     }
@@ -311,11 +354,17 @@ fun ContactProfileDetailsDialog(
                         modifier = Modifier
                             .weight(1f)
                             .padding(horizontal = 4.dp)
-                            .clickable {
-                                onDismiss()
-                                onStartCall(member, CallType.VIDEO)
-                            },
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F2F5)),
+                            .then(
+                                if (member.isRegisteredOnTalkly) {
+                                    Modifier.clickable {
+                                        onDismiss()
+                                        onStartCall(member, CallType.VIDEO)
+                                    }
+                                } else Modifier
+                            ),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (member.isRegisteredOnTalkly) Color(0xFFF0F2F5) else Color(0xFFEFEFEF)
+                        ),
                         shape = RoundedCornerShape(16.dp)
                     ) {
                         Column(
@@ -325,7 +374,7 @@ fun ContactProfileDetailsDialog(
                             Icon(
                                 imageVector = Icons.Default.Videocam,
                                 contentDescription = "Video Call",
-                                tint = WhatsappGreen,
+                                tint = if (member.isRegisteredOnTalkly) WhatsappGreen else Color.Gray,
                                 modifier = Modifier.size(24.dp)
                             )
                             Spacer(modifier = Modifier.height(4.dp))
@@ -333,7 +382,7 @@ fun ContactProfileDetailsDialog(
                                 text = "Video",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = WhatsappGreen
+                                color = if (member.isRegisteredOnTalkly) WhatsappGreen else Color.Gray
                             )
                         }
                     }
@@ -466,6 +515,24 @@ fun ContactProfileDetailsDialog(
                         fontWeight = FontWeight.Bold,
                         fontSize = 15.sp
                     )
+                }
+
+                if (onDeleteContact != null) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    TextButton(
+                        onClick = {
+                            onDeleteContact(member.id)
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "🗑️ Remove / Delete Contact",
+                            color = Color.Red,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }

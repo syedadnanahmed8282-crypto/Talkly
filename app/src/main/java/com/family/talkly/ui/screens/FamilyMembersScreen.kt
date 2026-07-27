@@ -54,15 +54,43 @@ import com.family.talkly.ui.components.ContactProfileDetailsDialog
 import com.family.talkly.ui.theme.WhatsappGreen
 import com.family.talkly.ui.theme.WhatsappTeal
 
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
+import com.family.talkly.data.models.UserProfile
+import com.family.talkly.ui.components.AddContactDialog
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FamilyMembersScreen(
     familyMembers: List<FamilyMember>,
     onSelectMember: (FamilyMember) -> Unit,
     onStartCall: (FamilyMember, CallType) -> Unit,
-    onTogglePresence: (FamilyMember) -> Unit
+    onTogglePresence: (FamilyMember) -> Unit,
+    onSearchUserByPhone: ((phone: String, onResult: (UserProfile?) -> Unit) -> Unit)? = null,
+    onAddContact: ((name: String, phone: String, relation: String, bio: String, avatarUrl: String?) -> Unit)? = null,
+    onDeleteContact: ((String) -> Unit)? = null,
+    onClearDemoContacts: (() -> Unit)? = null
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     var selectedContactForProfile by remember { mutableStateOf<FamilyMember?>(null) }
+    var showAddContactDialog by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+
+    if (showAddContactDialog && onSearchUserByPhone != null && onAddContact != null) {
+        AddContactDialog(
+            onDismiss = { showAddContactDialog = false },
+            onSearchUserByPhone = { phone, callback ->
+                onSearchUserByPhone(phone, callback)
+            },
+            onAddContact = { name, phone, relation, bio, avatarUrl ->
+                onAddContact(name, phone, relation, bio, avatarUrl)
+            }
+        )
+    }
 
     if (selectedContactForProfile != null) {
         ContactProfileDetailsDialog(
@@ -75,6 +103,10 @@ fun FamilyMembersScreen(
             onStartCall = { member, callType ->
                 selectedContactForProfile = null
                 onStartCall(member, callType)
+            },
+            onDeleteContact = { id ->
+                selectedContactForProfile = null
+                onDeleteContact?.invoke(id)
             }
         )
     }
@@ -89,8 +121,62 @@ fun FamilyMembersScreen(
                         color = Color.White
                     )
                 },
+                actions = {
+                    IconButton(onClick = { showAddContactDialog = true }) {
+                        Icon(
+                            imageVector = Icons.Default.PersonAdd,
+                            contentDescription = "Add Contact",
+                            tint = Color.White
+                        )
+                    }
+                    IconButton(onClick = { showMenu = !showMenu }) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Menu",
+                            tint = Color.White
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Add New Contact") },
+                            leadingIcon = {
+                                Icon(Icons.Default.PersonAdd, contentDescription = null, tint = WhatsappGreen)
+                            },
+                            onClick = {
+                                showMenu = false
+                                showAddContactDialog = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Clear Demo Contacts") },
+                            leadingIcon = {
+                                Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color.Gray)
+                            },
+                            onClick = {
+                                showMenu = false
+                                onClearDemoContacts?.invoke()
+                            }
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = WhatsappTeal)
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showAddContactDialog = true },
+                containerColor = WhatsappGreen,
+                contentColor = Color.White,
+                shape = CircleShape
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PersonAdd,
+                    contentDescription = "Add Contact"
+                )
+            }
         }
     ) { innerPadding ->
         Column(
@@ -223,10 +309,11 @@ fun FamilyMembersScreen(
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = member.status,
+                                    text = if (!member.isRegisteredOnTalkly) "User not registered on Talkly" else member.status,
                                     fontSize = 13.sp,
-                                    color = Color.Gray,
-                                    maxLines = 1
+                                    color = if (!member.isRegisteredOnTalkly) Color(0xFFD32F2F) else Color.Gray,
+                                    maxLines = 1,
+                                    fontWeight = if (!member.isRegisteredOnTalkly) FontWeight.Bold else FontWeight.Normal
                                 )
                                 Text(
                                     text = member.phone,
@@ -236,18 +323,30 @@ fun FamilyMembersScreen(
                             }
 
                             Row {
-                                IconButton(onClick = { onSelectMember(member) }) {
+                                IconButton(onClick = {
+                                    if (member.isRegisteredOnTalkly) {
+                                        onSelectMember(member)
+                                    } else {
+                                        android.widget.Toast.makeText(context, "User not registered on Talkly", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }) {
                                     Icon(
                                         imageVector = Icons.AutoMirrored.Filled.Chat,
                                         contentDescription = "Chat",
-                                        tint = WhatsappTeal
+                                        tint = if (member.isRegisteredOnTalkly) WhatsappTeal else Color.Gray
                                     )
                                 }
-                                IconButton(onClick = { onStartCall(member, CallType.VIDEO) }) {
+                                IconButton(onClick = {
+                                    if (member.isRegisteredOnTalkly) {
+                                        onStartCall(member, CallType.VIDEO)
+                                    } else {
+                                        android.widget.Toast.makeText(context, "User not registered on Talkly", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }) {
                                     Icon(
                                         imageVector = Icons.Default.Videocam,
                                         contentDescription = "Video",
-                                        tint = WhatsappTeal
+                                        tint = if (member.isRegisteredOnTalkly) WhatsappTeal else Color.Gray
                                     )
                                 }
                             }

@@ -11,7 +11,9 @@ data class FamilyMember(
     val isTyping: Boolean = false,
     val lastSeen: String = "Just now",
     val unreadCount: Int = 0,
-    val isPinned: Boolean = false
+    val isPinned: Boolean = false,
+    val isRegisteredOnTalkly: Boolean = false,
+    val firebaseUid: String? = null
 )
 
 val DEFAULT_FAMILY_MEMBERS = listOf(

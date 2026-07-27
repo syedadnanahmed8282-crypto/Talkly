@@ -19,13 +19,17 @@ class FirebaseChatRepository(private val context: Context) {
     companion object {
         const val TAG = "Talkly_FirebaseChat"
         const val FIREBASE_PROJECT_ID = "familycallapp-e6b21"
+        private const val CONTACTS_PREFS = "talkly_saved_contacts_prefs"
+        private const val KEY_SAVED_CONTACTS_JSON = "saved_contacts_json"
+        private const val KEY_DEMO_CLEARED = "demo_contacts_cleared"
     }
 
     private var firestore: FirebaseFirestore? = null
     private var membersListener: ListenerRegistration? = null
+    private val contactPrefs = context.getSharedPreferences(CONTACTS_PREFS, Context.MODE_PRIVATE)
 
     // Real-time family members presence and status
-    private val _familyMembers = MutableStateFlow<List<FamilyMember>>(DEFAULT_FAMILY_MEMBERS)
+    private val _familyMembers = MutableStateFlow<List<FamilyMember>>(emptyList())
     val familyMembers: StateFlow<List<FamilyMember>> = _familyMembers.asStateFlow()
 
     // Time offset for live testing 48-hour expiration logic
@@ -43,10 +47,201 @@ class FirebaseChatRepository(private val context: Context) {
             firestore = FirebaseFirestore.getInstance()
             Log.i(TAG, "Initialized Firebase Firestore for project $FIREBASE_PROJECT_ID")
             setupFirestorePresenceListener()
+            setupFirestoreUsersVerificationListener()
         } catch (e: Exception) {
             Log.w(TAG, "Firebase Firestore init fallback mode: ${e.localizedMessage}")
         }
+        loadInitialFamilyMembers()
         seedInitialFamilyChats()
+    }
+
+    private fun loadInitialFamilyMembers() {
+        val savedJson = contactPrefs.getString(KEY_SAVED_CONTACTS_JSON, null)
+        val demoCleared = contactPrefs.getBoolean(KEY_DEMO_CLEARED, false)
+
+        val list = mutableListOf<FamilyMember>()
+
+        if (!demoCleared) {
+            list.addAll(DEFAULT_FAMILY_MEMBERS)
+        }
+
+        if (!savedJson.isNullOrBlank()) {
+            try {
+                val jsonArray = org.json.JSONArray(savedJson)
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val member = FamilyMember(
+                        id = obj.getString("id"),
+                        name = obj.getString("name"),
+                        relation = obj.optString("relation", "Contact"),
+                        avatarUrl = if (obj.has("avatarUrl") && !obj.isNull("avatarUrl")) obj.getString("avatarUrl") else null,
+                        status = obj.optString("status", "Available for call 💬"),
+                        phone = obj.getString("phone"),
+                        isOnline = obj.optBoolean("isOnline", true),
+                        isTyping = false,
+                        lastSeen = obj.optString("lastSeen", "Recently"),
+                        unreadCount = obj.optInt("unreadCount", 0),
+                        isPinned = obj.optBoolean("isPinned", false),
+                        isRegisteredOnTalkly = obj.optBoolean("isRegisteredOnTalkly", false),
+                        firebaseUid = if (obj.has("firebaseUid") && !obj.isNull("firebaseUid")) obj.getString("firebaseUid") else null
+                    )
+                    // Avoid duplicate IDs
+                    if (list.none { it.id == member.id }) {
+                        list.add(member)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to parse saved contacts JSON: ${e.message}")
+            }
+        }
+
+        _familyMembers.value = list
+    }
+
+    private fun saveContactsToPrefs() {
+        try {
+            val jsonArray = org.json.JSONArray()
+            _familyMembers.value.forEach { member ->
+                val obj = org.json.JSONObject().apply {
+                    put("id", member.id)
+                    put("name", member.name)
+                    put("relation", member.relation)
+                    put("avatarUrl", member.avatarUrl)
+                    put("status", member.status)
+                    put("phone", member.phone)
+                    put("isOnline", member.isOnline)
+                    put("lastSeen", member.lastSeen)
+                    put("unreadCount", member.unreadCount)
+                    put("isPinned", member.isPinned)
+                    put("isRegisteredOnTalkly", member.isRegisteredOnTalkly)
+                    put("firebaseUid", member.firebaseUid)
+                }
+                jsonArray.put(obj)
+            }
+            contactPrefs.edit()
+                .putString(KEY_SAVED_CONTACTS_JSON, jsonArray.toString())
+                .apply()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving contacts to prefs: ${e.message}")
+        }
+    }
+
+    fun searchTalklyUserByPhone(phone: String, onResult: (com.family.talkly.data.models.UserProfile?) -> Unit) {
+        val cleanPhone = phone.trim().replace(" ", "").replace("-", "")
+        if (cleanPhone.isBlank()) {
+            onResult(null)
+            return
+        }
+
+        try {
+            firestore?.collection("users")
+                ?.get()
+                ?.addOnSuccessListener { snapshot ->
+                    if (snapshot != null && !snapshot.isEmpty) {
+                        for (doc in snapshot.documents) {
+                            val userPhone = (doc.getString("phoneNumber") ?: "").trim().replace(" ", "").replace("-", "")
+                            val docUid = doc.id
+                            if (userPhone.contains(cleanPhone) || cleanPhone.contains(userPhone) || docUid == cleanPhone) {
+                                val name = doc.getString("name") ?: "Talkly User"
+                                val rawPhone = doc.getString("phoneNumber") ?: phone
+                                val pic = doc.getString("profilePicUrl") ?: ""
+                                val bio = doc.getString("bio") ?: "Available on Talkly 💬"
+                                val profile = com.family.talkly.data.models.UserProfile(
+                                    uid = docUid,
+                                    name = name,
+                                    phoneNumber = rawPhone,
+                                    profilePicUrl = pic,
+                                    bio = bio
+                                )
+                                onResult(profile)
+                                return@addOnSuccessListener
+                            }
+                        }
+                    }
+                    onResult(null)
+                }
+                ?.addOnFailureListener {
+                    onResult(null)
+                } ?: onResult(null)
+        } catch (e: Exception) {
+            Log.w(TAG, "Search user exception: ${e.localizedMessage}")
+            onResult(null)
+        }
+    }
+
+    fun addNewContact(
+        name: String,
+        phone: String,
+        relation: String = "Family Member",
+        bio: String = "Available for call 💬",
+        avatarUrl: String? = null,
+        onComplete: ((FamilyMember) -> Unit)? = null
+    ) {
+        val cleanPhone = phone.trim()
+        val customId = "contact_${cleanPhone.replace("+", "").replace(" ", "")}"
+
+        val newMember = FamilyMember(
+            id = customId,
+            name = name.trim(),
+            relation = relation.ifBlank { "Family Member" },
+            avatarUrl = avatarUrl,
+            status = bio.ifBlank { "Available on Talkly 💬" },
+            phone = cleanPhone,
+            isOnline = true,
+            isTyping = false,
+            lastSeen = "Online",
+            unreadCount = 0,
+            isPinned = false
+        )
+
+        val currentList = _familyMembers.value.toMutableList()
+        // Remove existing if duplicate
+        currentList.removeAll { it.id == customId || it.phone == cleanPhone }
+        currentList.add(0, newMember) // Put at top
+        _familyMembers.value = currentList
+
+        saveContactsToPrefs()
+
+        // Sync to Firestore 'family_members'
+        try {
+            firestore?.collection("family_members")
+                ?.document(customId)
+                ?.set(
+                    mapOf(
+                        "id" to customId,
+                        "name" to name,
+                        "relation" to relation,
+                        "phone" to cleanPhone,
+                        "status" to bio,
+                        "avatarUrl" to avatarUrl,
+                        "isOnline" to true
+                    )
+                )
+        } catch (e: Exception) {
+            Log.w(TAG, "Firestore sync contact failed: ${e.localizedMessage}")
+        }
+
+        onComplete?.invoke(newMember)
+    }
+
+    fun deleteContact(memberId: String) {
+        val updatedList = _familyMembers.value.filter { it.id != memberId }
+        _familyMembers.value = updatedList
+        saveContactsToPrefs()
+
+        try {
+            firestore?.collection("family_members")?.document(memberId)?.delete()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error deleting contact from Firestore: ${e.message}")
+        }
+    }
+
+    fun clearDemoContacts() {
+        contactPrefs.edit().putBoolean(KEY_DEMO_CLEARED, true).apply()
+        val demoIds = setOf("mom", "dad", "grandma", "brother", "sister")
+        val filteredList = _familyMembers.value.filter { it.id !in demoIds }
+        _familyMembers.value = filteredList
+        saveContactsToPrefs()
     }
 
     private fun setupFirestorePresenceListener() {
@@ -129,168 +324,90 @@ class FirebaseChatRepository(private val context: Context) {
         setMemberPresence(memberId, newOnline, if (newOnline) "Online" else "Today at 10:15 AM")
     }
 
+    private var usersListener: ListenerRegistration? = null
+
+    private fun setupFirestoreUsersVerificationListener() {
+        try {
+            usersListener = firestore?.collection("users")
+                ?.addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.w(TAG, "Listen failed for users collection: ${error.localizedMessage}")
+                        return@addSnapshotListener
+                    }
+
+                    if (snapshot != null) {
+                        val registeredDocsMap = mutableMapOf<String, com.google.firebase.firestore.DocumentSnapshot>()
+                        for (doc in snapshot.documents) {
+                            val rawPhone = doc.getString("phoneNumber") ?: ""
+                            val cleanPhone = rawPhone.trim().replace(" ", "").replace("-", "")
+                            if (cleanPhone.isNotBlank()) {
+                                registeredDocsMap[cleanPhone] = doc
+                            }
+                            registeredDocsMap[doc.id] = doc
+                        }
+
+                        val updatedMembers = _familyMembers.value.map { member ->
+                            val cleanMemberPhone = member.phone.trim().replace(" ", "").replace("-", "")
+                            val matchedDoc = registeredDocsMap[cleanMemberPhone] ?: registeredDocsMap[member.id]
+
+                            if (matchedDoc != null) {
+                                val uid = matchedDoc.id
+                                val bio = matchedDoc.getString("bio") ?: member.status
+                                val pic = matchedDoc.getString("profilePicUrl") ?: member.avatarUrl
+                                val realName = matchedDoc.getString("name") ?: member.name
+                                member.copy(
+                                    name = if (realName.isNotBlank()) realName else member.name,
+                                    isRegisteredOnTalkly = true,
+                                    firebaseUid = uid,
+                                    avatarUrl = if (!pic.isNull_or_empty_str(pic)) pic else member.avatarUrl,
+                                    status = if (bio.isBlank()) "Available on Talkly 💬" else bio
+                                )
+                            } else {
+                                member.copy(
+                                    isRegisteredOnTalkly = false,
+                                    firebaseUid = null,
+                                    status = "User not registered on Talkly"
+                                )
+                            }
+                        }
+                        _familyMembers.value = updatedMembers
+                        saveContactsToPrefs()
+                    }
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not set up users verification listener: ${e.localizedMessage}")
+        }
+    }
+
+    private fun String?.isNull_or_empty_str(s: String?): Boolean = s == null || s.isEmpty()
+
+    fun deleteChatHistory(memberId: String) {
+        val updatedMap = _messagesMap.value.toMutableMap()
+        updatedMap.remove(memberId)
+        _messagesMap.value = updatedMap
+
+        try {
+            firestore?.collection("family_chats")
+                ?.document(memberId)
+                ?.collection("messages")
+                ?.get()
+                ?.addOnSuccessListener { snapshot ->
+                    for (doc in snapshot.documents) {
+                        doc.reference.delete()
+                    }
+                }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error clearing chat history in Firestore: ${e.localizedMessage}")
+        }
+    }
+
     fun triggerSimulatedTypingReply(memberId: String) {
-        // Show typing indicator for 2.5 seconds, then send reply
-        setMemberTyping(memberId, true)
-
-        mainHandler.postDelayed({
-            setMemberTyping(memberId, false)
-            val member = _familyMembers.value.firstOrNull { it.id == memberId }
-            val memberName = member?.name ?: "Family"
-            
-            val replyText = when (memberId) {
-                "mom" -> "Love you dear! Stay safe ❤️"
-                "dad" -> "Got it! Let me know if you need anything 🚗"
-                "grandma" -> "God bless you child! 🍪"
-                "brother" -> "Haha cool! Catch up later 🎮"
-                "sister" -> "Nice! Sending hugs 🎨"
-                else -> "Received! Talk soon 💖"
-            }
-
-            val replyMsg = ChatMessage(
-                id = "msg_${System.currentTimeMillis()}",
-                senderId = memberId,
-                senderName = memberName,
-                receiverId = "self",
-                messageType = MessageType.TEXT,
-                textContent = replyText,
-                timestamp = System.currentTimeMillis()
-            )
-
-            val currentList = (_messagesMap.value[memberId] ?: emptyList()).toMutableList()
-            currentList.add(replyMsg)
-
-            val updatedMap = _messagesMap.value.toMutableMap()
-            updatedMap[memberId] = currentList
-            _messagesMap.value = updatedMap
-
-        }, 3000)
+        // Disabled per requirements: No automated mock replies, bot responses, or local fallback test logic
     }
 
     private fun seedInitialFamilyChats() {
-        val now = System.currentTimeMillis()
-        val hourAgo = now - 3600000L
-        val dayAgo = now - 86400000L
-        val threeDaysAgo = now - (3 * 86400000L) // 72 hours ago (> 48h)
-
-        val momChat = listOf(
-            ChatMessage(
-                id = "m1",
-                senderId = "mom",
-                senderName = "Mom ❤️",
-                receiverId = "self",
-                messageType = MessageType.TEXT,
-                textContent = "Hi sweetie! Are you coming home for Sunday dinner? 🍲",
-                timestamp = threeDaysAgo - 10000,
-                isRead = true
-            ),
-            ChatMessage(
-                id = "m2",
-                senderId = "mom",
-                senderName = "Mom ❤️",
-                receiverId = "self",
-                messageType = MessageType.IMAGE,
-                textContent = "Family pie recipe from grandma 🥧",
-                mediaUrl = "https://images.unsplash.com/photo-1519869325930-281384150729?w=600&auto=format&fit=crop&q=80",
-                timestamp = threeDaysAgo, // > 48h ago -> EXPIRED
-                isRead = true
-            ),
-            ChatMessage(
-                id = "m3",
-                senderId = "self",
-                senderName = "You",
-                receiverId = "mom",
-                messageType = MessageType.TEXT,
-                textContent = "Yes Mom! I will be there at 6 PM.",
-                timestamp = dayAgo,
-                isRead = true
-            ),
-            ChatMessage(
-                id = "m4",
-                senderId = "mom",
-                senderName = "Mom ❤️",
-                receiverId = "self",
-                messageType = MessageType.IMAGE,
-                textContent = "Look at our garden flowers today! 🌸",
-                mediaUrl = "https://images.unsplash.com/photo-1508615039623-a25605d2b022?w=600&auto=format&fit=crop&q=80",
-                timestamp = hourAgo, // < 48h ago -> VISIBLE
-                isRead = false
-            ),
-            ChatMessage(
-                id = "m5",
-                senderId = "mom",
-                senderName = "Mom ❤️",
-                receiverId = "self",
-                messageType = MessageType.TEXT,
-                textContent = "Call me when you leave work!",
-                timestamp = now - 600000,
-                isRead = false
-            )
-        )
-
-        val dadChat = listOf(
-            ChatMessage(
-                id = "d1",
-                senderId = "dad",
-                senderName = "Dad 👨‍👧‍👦",
-                receiverId = "self",
-                messageType = MessageType.TEXT,
-                textContent = "Hey, did you check the tire pressure on your car?",
-                timestamp = dayAgo,
-                isRead = true
-            ),
-            ChatMessage(
-                id = "d2",
-                senderId = "self",
-                senderName = "You",
-                receiverId = "dad",
-                messageType = MessageType.TEXT,
-                textContent = "All good Dad, filled them up yesterday 👍",
-                timestamp = dayAgo + 1800000,
-                isRead = true
-            ),
-            ChatMessage(
-                id = "d3",
-                senderId = "dad",
-                senderName = "Dad 👨‍👧‍👦",
-                receiverId = "self",
-                messageType = MessageType.IMAGE,
-                textContent = "Old family trip photo from 2018 🏔️",
-                mediaUrl = "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=600&auto=format&fit=crop&q=80",
-                timestamp = threeDaysAgo + 3600000, // EXPIRED
-                isRead = true
-            )
-        )
-
-        val grandmaChat = listOf(
-            ChatMessage(
-                id = "g1",
-                senderId = "grandma",
-                senderName = "Grandma 👵",
-                receiverId = "self",
-                messageType = MessageType.TEXT,
-                textContent = "God bless you my dear! Here are the cookies I baked 🍪",
-                timestamp = now - 7200000,
-                isRead = true
-            ),
-            ChatMessage(
-                id = "g2",
-                senderId = "grandma",
-                senderName = "Grandma 👵",
-                receiverId = "self",
-                messageType = MessageType.IMAGE,
-                textContent = "Fresh out of the oven! 🍪",
-                mediaUrl = "https://images.unsplash.com/photo-1558961363-fa8fdf82db35?w=600&auto=format&fit=crop&q=80",
-                timestamp = now - 3600000, // VISIBLE
-                isRead = false
-            )
-        )
-
-        _messagesMap.value = mapOf(
-            "mom" to momChat,
-            "dad" to dadChat,
-            "grandma" to grandmaChat
-        )
+        // Disabled per requirements: No fake mock chats seeded locally
+        _messagesMap.value = emptyMap()
     }
 
     fun getMessagesForMember(memberId: String): List<ChatMessage> {

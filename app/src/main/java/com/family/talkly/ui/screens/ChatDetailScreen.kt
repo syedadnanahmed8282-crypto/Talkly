@@ -792,6 +792,7 @@ fun ChatDetailScreen(
                                     }
                                 }
                                 val statusSubtext = when {
+                                    !member.isRegisteredOnTalkly -> "User not registered on Talkly"
                                     isBlocked -> "Blocked"
                                     member.isTyping -> "typing..."
                                     member.isOnline -> "Online • Family"
@@ -801,7 +802,7 @@ fun ChatDetailScreen(
                                     text = statusSubtext,
                                     fontSize = 11.sp,
                                     fontWeight = if (member.isTyping && !isBlocked) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isBlocked) Color(0xFFFFCDD2) else if (member.isTyping) Color(0xFF25D366) else Color.White.copy(alpha = 0.8f)
+                                    color = if (!member.isRegisteredOnTalkly || isBlocked) Color(0xFFFFCDD2) else if (member.isTyping) Color(0xFF25D366) else Color.White.copy(alpha = 0.8f)
                                 )
                             }
                         }
@@ -827,18 +828,24 @@ fun ChatDetailScreen(
                                 tint = Color.White
                             )
                         }
-                        IconButton(onClick = { onStartCall(CallType.AUDIO) }) {
+                        IconButton(onClick = {
+                            if (member.isRegisteredOnTalkly) onStartCall(CallType.AUDIO)
+                            else Toast.makeText(context, "User not registered on Talkly", Toast.LENGTH_SHORT).show()
+                        }) {
                             Icon(
                                 imageVector = Icons.Default.Call,
                                 contentDescription = "Audio Call",
-                                tint = Color.White
+                                tint = if (member.isRegisteredOnTalkly) Color.White else Color.White.copy(alpha = 0.4f)
                             )
                         }
-                        IconButton(onClick = { onStartCall(CallType.VIDEO) }) {
+                        IconButton(onClick = {
+                            if (member.isRegisteredOnTalkly) onStartCall(CallType.VIDEO)
+                            else Toast.makeText(context, "User not registered on Talkly", Toast.LENGTH_SHORT).show()
+                        }) {
                             Icon(
                                 imageVector = Icons.Default.Videocam,
                                 contentDescription = "Video Call",
-                                tint = Color.White
+                                tint = if (member.isRegisteredOnTalkly) Color.White else Color.White.copy(alpha = 0.4f)
                             )
                         }
                         Box {
@@ -1518,8 +1525,34 @@ fun ChatDetailScreen(
                 }
             }
 
-            // Bottom Input Bar or Blocked Contact Banner
-            if (isBlocked) {
+            // Bottom Input Bar or Blocked/Unregistered Contact Banner
+            if (!member.isRegisteredOnTalkly) {
+                Surface(
+                    color = Color(0xFFFFEBEE),
+                    tonalElevation = 4.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = Color(0xFFD32F2F),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "User not registered on Talkly",
+                            color = Color(0xFFD32F2F),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            } else if (isBlocked) {
                 Surface(
                     color = Color(0xFFFFEBEE),
                     tonalElevation = 4.dp,

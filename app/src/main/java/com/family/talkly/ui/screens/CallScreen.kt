@@ -40,11 +40,119 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.graphics.SurfaceTexture
+import android.hardware.camera2.CameraCaptureSession
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraDevice
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
+import android.os.Handler
+import android.os.HandlerThread
+import android.util.Log
+import android.view.Surface
+import android.view.TextureView
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import com.family.talkly.data.models.CallType
 import com.family.talkly.data.zego.CurrentCallInfo
 import com.family.talkly.data.zego.ZegoCallEngineManager
 import com.family.talkly.ui.theme.WhatsappGreen
 import java.util.Locale
+
+@Composable
+fun CameraPreviewView(
+    isFrontCamera: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+
+    AndroidView(
+        factory = { ctx ->
+            TextureView(ctx).apply {
+                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                    private var cameraDevice: CameraDevice? = null
+                    private var captureSession: CameraCaptureSession? = null
+                    private var backgroundThread: HandlerThread? = null
+                    private var backgroundHandler: Handler? = null
+
+                    override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                        try {
+                            backgroundThread = HandlerThread("CameraBackground").also { it.start() }
+                            backgroundHandler = Handler(backgroundThread!!.looper)
+
+                            val cameraManager = ctx.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                            val targetFacing = if (isFrontCamera) CameraCharacteristics.LENS_FACING_FRONT else CameraCharacteristics.LENS_FACING_BACK
+
+                            val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
+                                val facing = cameraManager.getCameraCharacteristics(id).get(CameraCharacteristics.LENS_FACING)
+                                facing == targetFacing
+                            } ?: cameraManager.cameraIdList.firstOrNull() ?: return
+
+                            if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                                return
+                            }
+
+                            cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
+                                override fun onOpened(camera: CameraDevice) {
+                                    cameraDevice = camera
+                                    val surface = Surface(st)
+                                    val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW)
+                                    requestBuilder.addTarget(surface)
+
+                                    camera.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
+                                        override fun onConfigured(session: CameraCaptureSession) {
+                                            captureSession = session
+                                            try {
+                                                requestBuilder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                                                session.setRepeatingRequest(requestBuilder.build(), null, backgroundHandler)
+                                            } catch (e: Exception) {
+                                                Log.e("CameraPreviewView", "Error setting repeating request: ${e.message}")
+                                            }
+                                        }
+
+                                        override fun onConfigureFailed(session: CameraCaptureSession) {}
+                                    }, backgroundHandler)
+                                }
+
+                                override fun onDisconnected(camera: CameraDevice) {
+                                    camera.close()
+                                    cameraDevice = null
+                                }
+
+                                override fun onError(camera: CameraDevice, error: Int) {
+                                    camera.close()
+                                    cameraDevice = null
+                                }
+                            }, backgroundHandler)
+                        } catch (e: Exception) {
+                            Log.e("CameraPreviewView", "Error opening camera: ${e.message}")
+                        }
+                    }
+
+                    override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+
+                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                        try {
+                            captureSession?.close()
+                            cameraDevice?.close()
+                            backgroundThread?.quitSafely()
+                        } catch (e: Exception) {
+                            Log.e("CameraPreviewView", "Error releasing camera: ${e.message}")
+                        }
+                        return true
+                    }
+
+                    override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                }
+            }
+        },
+        modifier = modifier
+    )
+}
 
 @Composable
 fun CallScreen(
@@ -69,67 +177,59 @@ fun CallScreen(
     ) {
         // Video or Audio Main Canvas
         if (isVideo && !callInfo.isCameraOff) {
-            // Simulated Remote Video Feed Canvas
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xFF1B2A32),
-                                Color(0xFF0F1A20)
-                            )
-                        )
-                    ),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(
-                        modifier = Modifier
-                            .size(120.dp)
-                            .background(WhatsappGreen.copy(alpha = 0.2f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = member?.name?.take(2)?.uppercase() ?: "FA",
-                            color = Color.White,
-                            fontSize = 40.sp,
-                            fontWeight = FontWeight.Bold
+                // Live Hardware Camera Preview Feed
+                CameraPreviewView(
+                    isFrontCamera = callInfo.isFrontCamera,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Overlay Gradient and Member Tag
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Black.copy(alpha = 0.4f),
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.6f)
+                                )
+                            )
                         )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "ZEGOCloud Express Video Feed",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 14.sp
-                    )
-                }
+                )
 
                 // Local Picture-in-Picture Preview Box
                 Surface(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(top = 80.dp, end = 16.dp)
-                        .size(width = 100.dp, height = 150.dp)
+                        .size(width = 110.dp, height = 160.dp)
                         .clip(RoundedCornerShape(16.dp))
                         .border(2.dp, WhatsappGreen, RoundedCornerShape(16.dp)),
                     color = Color.Black
                 ) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        CameraPreviewView(
+                            isFrontCamera = callInfo.isFrontCamera,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .background(Color.Black.copy(alpha = 0.6f))
+                                .padding(4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Text(
-                                text = if (callInfo.isFrontCamera) "Self (Front)" else "Self (Back)",
+                                text = if (callInfo.isFrontCamera) "Front Cam" else "Rear Cam",
                                 color = Color.White,
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = if (callInfo.isMuted) "Muted" else "Mic On",
-                                color = if (callInfo.isMuted) Color.Red else WhatsappGreen,
-                                fontSize = 10.sp
                             )
                         }
                     }

@@ -78,7 +78,19 @@ import com.family.talkly.ui.components.UserProfileDetailsDialog
 import com.family.talkly.ui.theme.WhatsappGreen
 import com.family.talkly.ui.theme.WhatsappTeal
 
-@OptIn(ExperimentalMaterial3Api::class)
+import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material3.FloatingActionButton
+import com.family.talkly.ui.components.AddContactDialog
+
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Forum
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatListScreen(
     familyMembers: List<FamilyMember>,
@@ -92,14 +104,34 @@ fun ChatListScreen(
     onSelectMember: (FamilyMember) -> Unit,
     onStartCall: (FamilyMember, CallType) -> Unit,
     onTriggerIncomingDemo: (FamilyMember) -> Unit,
-    onTogglePinMember: ((String) -> Unit)? = null
+    onTogglePinMember: ((String) -> Unit)? = null,
+    onSearchUserByPhone: ((phone: String, onResult: (UserProfile?) -> Unit) -> Unit)? = null,
+    onAddContact: ((name: String, phone: String, relation: String, bio: String, avatarUrl: String?) -> Unit)? = null,
+    onDeleteContact: ((String) -> Unit)? = null,
+    onDeleteChatHistory: ((String) -> Unit)? = null,
+    onClearDemoContacts: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
     var showMenu by remember { mutableStateOf(false) }
     var showProfileDialog by remember { mutableStateOf(false) }
     var showThemeDialog by remember { mutableStateOf(false) }
+    var showAddContactDialog by remember { mutableStateOf(false) }
     var selectedContactForProfile by remember { mutableStateOf<FamilyMember?>(null) }
+    var memberToDeleteHistory by remember { mutableStateOf<FamilyMember?>(null) }
 
     val isDark = LocalIsDarkTheme.current
+
+    if (showAddContactDialog && onSearchUserByPhone != null && onAddContact != null) {
+        AddContactDialog(
+            onDismiss = { showAddContactDialog = false },
+            onSearchUserByPhone = { phone, callback ->
+                onSearchUserByPhone(phone, callback)
+            },
+            onAddContact = { name, phone, relation, bio, avatarUrl ->
+                onAddContact(name, phone, relation, bio, avatarUrl)
+            }
+        )
+    }
 
     if (showThemeDialog) {
         AlertDialog(
@@ -189,6 +221,55 @@ fun ChatListScreen(
             onStartCall = { member, callType ->
                 selectedContactForProfile = null
                 onStartCall(member, callType)
+            },
+            onDeleteContact = { id ->
+                selectedContactForProfile = null
+                onDeleteContact?.invoke(id)
+            }
+        )
+    }
+
+    if (memberToDeleteHistory != null) {
+        AlertDialog(
+            onDismissRequest = { memberToDeleteHistory = null },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = null,
+                    tint = Color(0xFFD32F2F)
+                )
+            },
+            title = {
+                Text(
+                    text = "Delete Chat History",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to delete all chat history with ${memberToDeleteHistory?.name}? This action cannot be undone.",
+                    fontSize = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val targetId = memberToDeleteHistory?.id
+                        if (targetId != null) {
+                            onDeleteChatHistory?.invoke(targetId)
+                            Toast.makeText(context, "Chat history deleted", Toast.LENGTH_SHORT).show()
+                        }
+                        memberToDeleteHistory = null
+                    }
+                ) {
+                    Text("Delete", color = Color(0xFFD32F2F), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { memberToDeleteHistory = null }) {
+                    Text("Cancel", color = Color.Gray)
+                }
             }
         )
     }
@@ -275,6 +356,26 @@ fun ChatListScreen(
                         onDismissRequest = { showMenu = false }
                     ) {
                         DropdownMenuItem(
+                            text = { Text("Add New Contact") },
+                            leadingIcon = {
+                                Icon(Icons.Default.PersonAdd, contentDescription = null, tint = WhatsappGreen)
+                            },
+                            onClick = {
+                                showMenu = false
+                                showAddContactDialog = true
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Clear Demo Contacts") },
+                            leadingIcon = {
+                                Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = Color.Gray)
+                            },
+                            onClick = {
+                                showMenu = false
+                                onClearDemoContacts?.invoke()
+                            }
+                        )
+                        DropdownMenuItem(
                             text = { Text("App Theme (${currentThemeMode.name})") },
                             leadingIcon = {
                                 Icon(Icons.Default.Palette, contentDescription = null, tint = WhatsappTeal)
@@ -310,6 +411,19 @@ fun ChatListScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = WhatsappTeal)
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showAddContactDialog = true },
+                containerColor = WhatsappGreen,
+                contentColor = Color.White,
+                shape = CircleShape
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PersonAdd,
+                    contentDescription = "Add Contact"
+                )
+            }
         }
     ) { innerPadding ->
         Column(
@@ -355,24 +469,63 @@ fun ChatListScreen(
             val sortedMembers = remember(familyMembers) {
                 familyMembers.sortedWith(compareByDescending { it.isPinned })
             }
-            LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(sortedMembers) { member ->
-                    val memberMessages = messagesMap[member.id] ?: emptyList()
-                    val lastMessage = memberMessages.lastOrNull()
+            val activeChatMembers = remember(sortedMembers, messagesMap) {
+                sortedMembers.filter { member ->
+                    (messagesMap[member.id] ?: emptyList()).isNotEmpty()
+                }
+            }
 
-                    FamilyChatRow(
-                        member = member,
-                        lastMessage = lastMessage,
-                        simulatedTimeOffsetMs = simulatedTimeOffsetMs,
-                        onClick = { onSelectMember(member) },
-                        onAvatarClick = { selectedContactForProfile = member },
-                        onAudioCall = { onStartCall(member, CallType.AUDIO) },
-                        onVideoCall = { onStartCall(member, CallType.VIDEO) }
-                    )
-                    Divider(
-                        color = Color.LightGray.copy(alpha = 0.2f),
-                        modifier = Modifier.padding(start = 76.dp)
-                    )
+            if (activeChatMembers.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Forum,
+                            contentDescription = null,
+                            tint = Color.Gray,
+                            modifier = Modifier.size(64.dp)
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "No active chats yet",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Saved contacts appear in the Contacts tab. Tap any contact there to start a chat!",
+                            fontSize = 14.sp,
+                            color = Color.Gray,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                }
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    items(activeChatMembers) { member ->
+                        val memberMessages = messagesMap[member.id] ?: emptyList()
+                        val lastMessage = memberMessages.lastOrNull()
+
+                        FamilyChatRow(
+                            member = member,
+                            lastMessage = lastMessage,
+                            simulatedTimeOffsetMs = simulatedTimeOffsetMs,
+                            onClick = { onSelectMember(member) },
+                            onLongClick = { memberToDeleteHistory = member },
+                            onAvatarClick = { selectedContactForProfile = member },
+                            onAudioCall = { onStartCall(member, CallType.AUDIO) },
+                            onVideoCall = { onStartCall(member, CallType.VIDEO) }
+                        )
+                        Divider(
+                            color = Color.LightGray.copy(alpha = 0.2f),
+                            modifier = Modifier.padding(start = 76.dp)
+                        )
+                    }
                 }
             }
         }
@@ -448,6 +601,7 @@ private fun FamilyChatRow(
     lastMessage: ChatMessage?,
     simulatedTimeOffsetMs: Long,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
     onAvatarClick: () -> Unit,
     onAudioCall: () -> Unit,
     onVideoCall: () -> Unit
@@ -455,7 +609,10 @@ private fun FamilyChatRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onClick() }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
