@@ -57,33 +57,38 @@ class AuthManager(private val context: Context) {
      * Checks local session and Firebase Auth current user to resume session
      */
     fun checkCurrentSession() {
-        val isLoggedIn = prefs.getBoolean(KEY_IS_LOGGED_IN, false)
-        val savedUid = prefs.getString(KEY_UID, null)
-        val firebaseUser = firebaseAuth.currentUser
+        try {
+            val isLoggedIn = prefs.getBoolean(KEY_IS_LOGGED_IN, false)
+            val savedUid = prefs.getString(KEY_UID, null)
+            val firebaseUser = try { firebaseAuth.currentUser } catch (e: Exception) { null }
 
-        if (isLoggedIn && !savedUid.isNullOrEmpty()) {
-            val name = prefs.getString(KEY_NAME, "") ?: ""
-            val phone = prefs.getString(KEY_PHONE, "") ?: ""
-            val pic = prefs.getString(KEY_PROFILE_PIC, "") ?: ""
-            val bio = prefs.getString(KEY_BIO, "Available on Talkly 💬") ?: "Available on Talkly 💬"
+            if (isLoggedIn && !savedUid.isNullOrEmpty()) {
+                val name = prefs.getString(KEY_NAME, "") ?: ""
+                val phone = prefs.getString(KEY_PHONE, "") ?: ""
+                val pic = prefs.getString(KEY_PROFILE_PIC, "") ?: ""
+                val bio = prefs.getString(KEY_BIO, "Available on Talkly 💬") ?: "Available on Talkly 💬"
 
-            if (name.isNotBlank()) {
-                val profile = UserProfile(
-                    uid = savedUid,
-                    name = name,
-                    phoneNumber = phone,
-                    profilePicUrl = pic,
-                    bio = bio
-                )
-                _authState.value = AuthState.Authenticated(profile)
+                if (name.isNotBlank()) {
+                    val profile = UserProfile(
+                        uid = savedUid,
+                        name = name,
+                        phoneNumber = phone,
+                        profilePicUrl = pic,
+                        bio = bio
+                    )
+                    _authState.value = AuthState.Authenticated(profile)
+                } else {
+                    _authState.value = AuthState.ProfileSetupRequired(savedUid, phone)
+                }
+            } else if (firebaseUser != null) {
+                val uid = firebaseUser.uid
+                val phone = firebaseUser.phoneNumber ?: ""
+                checkUserProfileInFirestore(uid, phone)
             } else {
-                _authState.value = AuthState.ProfileSetupRequired(savedUid, phone)
+                _authState.value = AuthState.Unauthenticated
             }
-        } else if (firebaseUser != null) {
-            val uid = firebaseUser.uid
-            val phone = firebaseUser.phoneNumber ?: ""
-            checkUserProfileInFirestore(uid, phone)
-        } else {
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking current session: ${e.message}")
             _authState.value = AuthState.Unauthenticated
         }
     }
